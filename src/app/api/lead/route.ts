@@ -267,37 +267,49 @@ export async function GET() {
     }
   }
 
+  // A healthy deploy answers with the summary and nothing else. The forensic
+  // fields appear only when something is actually broken — they are what makes
+  // this endpoint self-diagnosing, but there is no reason to hand a passer-by a
+  // description of the credential when it is working.
+  const forensics =
+    diagnosis === 'ok'
+      ? {}
+      : {
+          serviceKeyFormat: k.format,
+          // Shape only — a length and a segment count cannot reconstruct a
+          // secret, but they identify mangling a presence boolean cannot see. A
+          // healthy legacy key is ~200-250 chars in exactly 3 dot-separated
+          // segments. The real incident was a value of 219 characters with zero
+          // dots: the masked "••••" rendering copied out of a dashboard field.
+          serviceKeyLength: key.length,
+          serviceKeySegments: key ? key.split('.').length : 0,
+          // A JWT is strictly [A-Za-z0-9._-]. Anything outside that means the
+          // value was transformed on the way in rather than mistyped, and a
+          // character above 255 makes fetch throw while building the header —
+          // before any request is sent, so it presents as a network outage.
+          serviceKeyCharsetOk: /^[A-Za-z0-9._-]*$/.test(key),
+          serviceKeyNonAsciiCount: (key.match(/[^ -~]/g) || []).length,
+          // Should be "service_role". "anon" means the wrong key was pasted in.
+          serviceKeyRole: k.role,
+          // false means the key belongs to a DIFFERENT Supabase project.
+          serviceKeyMatchesProject: k.ref && urlRef ? k.ref === urlRef : null,
+          // true here while leadsTableReachable is false isolates the fault to
+          // the key: PostgREST answers 401 unauthenticated, so any reply at all
+          // proves the host resolves.
+          supabaseHostReachable: urlReachable,
+          fetchFailure: failure,
+          httpStatus: status,
+          postgrestCode: code,
+        }
+
   return NextResponse.json({
     supabaseUrlPresent: !!url,
     supabaseUrlLooksValid: !!urlRef,
     serviceKeyPresent: !!key,
-    serviceKeyFormat: k.format,
-    // Shape only. A length and a segment count cannot reconstruct a secret, but
-    // they identify the mangling that a presence boolean cannot see: a healthy
-    // legacy key is one line, roughly 200-250 chars, in exactly 3 dot-separated
-    // segments, with no interior whitespace. Interior whitespace is fatal on its
-    // own — a newline makes the value illegal as an HTTP header, so fetch throws
-    // before a request is ever sent and the failure looks like a network outage.
-    serviceKeyLength: key.length,
-    serviceKeySegments: key ? key.split('.').length : 0,
-    serviceKeyHasInteriorWhitespace: /s/.test(key),
-    // A JWT is strictly [A-Za-z0-9._-]. Anything else means the value was
-    // transformed on its way into the dashboard rather than merely mistyped,
-    // and a non-Latin-1 character is what makes fetch throw before it sends.
-    serviceKeyCharsetOk: /^[A-Za-z0-9._-]*$/.test(key),
-    serviceKeyNonAsciiCount: (key.match(/[^ -~]/g) || []).length,
-    // Should be "service_role". "anon" means the wrong key was pasted in.
-    serviceKeyRole: k.role,
-    // false means the key belongs to a DIFFERENT Supabase project than the URL.
-    serviceKeyMatchesProject: k.ref && urlRef ? k.ref === urlRef : null,
     leadsTableReachable: reachable,
-    // true here with leadsTableReachable false isolates the fault to the key.
-    supabaseHostReachable: urlReachable,
-    fetchFailure: failure,
-    httpStatus: status,
-    postgrestCode: code,
     diagnosis,
     resendConfigured,
     canAcceptLeads: reachable || resendConfigured,
+    ...forensics,
   })
 }
