@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Avantra marketing — design tokens.
+
+   Deliberately the same indigo as the TMS at avantracs.app, so a carrier who
+   signs up here and then logs in there recognises the same product. Everything
+   else is looser than the app: more air, larger type, fewer borders.
+   ───────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-ink-950: #0b1020;
+  --color-ink-900: #111a33;
+  --color-ink-800: #1b2545;
+  --color-ink-700: #2a3560;
+
+  --color-brand-50:  #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+
+  --color-accent-400: #34d399;
+  --color-accent-500: #10b981;
+  --color-accent-600: #059669;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: #ffffff;
+  color: var(--color-ink-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Respect users who ask for less motion — the hero and reveal transitions are
+   decorative, never load-bearing. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Subtle grid for the dark hero. Pure CSS so it costs no request. */
+.hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%);
+}
