@@ -155,8 +155,16 @@ export async function POST(req: NextRequest) {
   // emailed it, their message reached us.
   if (!stored && !notified) {
     console.error('[lead] LOST a submission —', storeError, JSON.stringify({ email: lead.email }))
+    // Coarse reason code only. The visitor sees the friendly message; this tells
+    // an operator WHICH branch failed without leaking a database error string to
+    // the public. Without it, "misconfigured" and "insert rejected" are
+    // indistinguishable from outside, which is exactly the hole that made this
+    // undebuggable remotely.
     return NextResponse.json(
-      { error: 'We could not record your message. Please email or call us directly.' },
+      {
+        error: 'We could not record your message. Please email or call us directly.',
+        reason: storeError === 'Supabase not configured' ? 'not_configured' : 'store_failed',
+      },
       { status: 500 },
     )
   }
@@ -164,4 +172,26 @@ export async function POST(req: NextRequest) {
   if (!stored) console.warn('[lead] not stored, emailed only:', storeError)
 
   return NextResponse.json({ ok: true })
+}
+
+/**
+ * GET /api/lead — configuration health.
+ *
+ * Booleans only: whether each variable is PRESENT, never its value. Enough to
+ * diagnose a misconfigured deploy from outside without exposing anything. The
+ * equivalent question was previously unanswerable without dashboard access.
+ */
+export async function GET() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  return NextResponse.json({
+    supabaseUrlPresent: !!url,
+    supabaseUrlLooksValid: url.startsWith('https://') && url.includes('.supabase.co'),
+    serviceKeyPresent: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    resendConfigured: !!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL,
+    // If storage is unconfigured AND email is unconfigured, a real submission
+    // has nowhere to go and will 500.
+    canAcceptLeads:
+      (!!url && !!process.env.SUPABASE_SERVICE_ROLE_KEY) ||
+      (!!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL),
+  })
 }
