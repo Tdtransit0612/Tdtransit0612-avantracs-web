@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { connection } from 'next/server'
 import { Geist } from 'next/font/google'
 import Nav from '@/components/Nav'
 import Footer from '@/components/Footer'
@@ -39,7 +40,17 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Render per-request rather than at build time. The CSP nonce minted in
+  // src/proxy.ts is only injectable during server-side rendering — a page
+  // prerendered at build time has no request to take a nonce from, so its
+  // inline RSC scripts would ship unnonced and be blocked by our own CSP.
+  //
+  // Being in the root layout, this opts the whole page tree in at once. The
+  // cost is real but small: these pages fetch nothing and render from static
+  // JSX, so there is no data work to redo per request — only the render itself.
+  await connection()
+
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
       <body className="flex min-h-full flex-col antialiased">
