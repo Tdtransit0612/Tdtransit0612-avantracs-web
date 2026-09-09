@@ -34,7 +34,7 @@ export default function TermsPage() {
           <div>
             <h2 className="text-xl font-semibold text-ink-900">What this site is</h2>
             <p className="mt-3">
-              {SITE.url} describes the dispatch and back-office services offered by {SITE.name}. It
+              {SITE.domain} describes the dispatch and back-office services offered by {SITE.name}. It
               is informational. Nothing here is a binding offer, and submitting the contact form
               does not create a business relationship — that begins only when a dispatch service
               agreement is signed by both parties.

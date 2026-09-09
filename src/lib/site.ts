@@ -12,7 +12,13 @@ export const SITE = {
   name: 'Avantra Carrier Services',
   shortName: 'Avantra',
   tagline: 'Dispatch and back office for owner-operators and small fleets',
-  url: process.env.NEXT_PUBLIC_SITE_URL || 'https://avantracs.com',
+  // WWW, not the apex. The apex 308-redirects to www, and this value becomes
+  // metadataBase — so an apex default puts a redirecting URL in every canonical
+  // tag, every og:url, and every sitemap entry, which asks search engines to
+  // index one host while the site insists on another.
+  url: process.env.NEXT_PUBLIC_SITE_URL || 'https://www.avantracs.com',
+  // For prose. Rendering a full URL mid-sentence reads badly.
+  domain: 'avantracs.com',
   appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://avantracs.app',
 
   // TODO: real contact details. Blank renders nothing rather than a fake number.
