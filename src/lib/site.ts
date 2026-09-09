@@ -8,6 +8,22 @@
 // here once and every page updates.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Read a config value from the environment, trimmed, treating whitespace-only
+ * as absent so the fallback wins.
+ *
+ * Values pasted into a hosting dashboard arrive mangled more often than you
+ * would think, and NEXT_PUBLIC_ values are inlined at BUILD time — so a stray
+ * character is baked into every page and cannot be fixed without a redeploy.
+ * NEXT_PUBLIC_APP_URL really did arrive here with a leading tab, which rendered
+ * as href="<TAB>https://avantracs.app". Browsers strip leading whitespace in a
+ * URL attribute so the link still worked, which is exactly why it went unnoticed
+ * — but the same value read as a plain string would have carried the tab into
+ * prose and into any new URL() call.
+ */
+const env = (name: string, fallback = ''): string =>
+  (process.env[name] ?? '').trim() || fallback
+
 export const SITE = {
   name: 'Avantra Carrier Services',
   shortName: 'Avantra',
@@ -16,14 +32,14 @@ export const SITE = {
   // metadataBase — so an apex default puts a redirecting URL in every canonical
   // tag, every og:url, and every sitemap entry, which asks search engines to
   // index one host while the site insists on another.
-  url: process.env.NEXT_PUBLIC_SITE_URL || 'https://www.avantracs.com',
+  url: env('NEXT_PUBLIC_SITE_URL', 'https://www.avantracs.com'),
   // For prose. Rendering a full URL mid-sentence reads badly.
   domain: 'avantracs.com',
-  appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://avantracs.app',
+  appUrl: env('NEXT_PUBLIC_APP_URL', 'https://avantracs.app'),
 
   // TODO: real contact details. Blank renders nothing rather than a fake number.
-  email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || '',
-  phone: process.env.NEXT_PUBLIC_CONTACT_PHONE || '',
+  email: env('NEXT_PUBLIC_CONTACT_EMAIL'),
+  phone: env('NEXT_PUBLIC_CONTACT_PHONE'),
 }
 
 /**
