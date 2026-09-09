@@ -183,47 +183,85 @@ export async function POST(req: NextRequest) {
 /**
  * GET /api/lead — configuration health.
  *
- * Presence booleans (never values), PLUS a real round-trip to the table.
+ * Reports WHICH fault, never any secret value.
  *
- * The booleans alone once reported a perfectly healthy deploy while every
- * submission was being dropped, because the `leads` migration had never been
- * applied to the database. Env vars being set says nothing about whether the
- * write can actually land, so this now attempts the read.
+ * A key's own payload is not a secret to anyone already holding the key, so
+ * decoding it to check the role and project claims leaks nothing while
+ * answering the two questions that actually go wrong in a dashboard: is this
+ * the service key or something pasted over it, and does it belong to the
+ * project the URL points at? Those are invisible to a presence boolean, which
+ * is how a "healthy" deploy dropped every submission.
  */
-export async function GET() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-  const resendConfigured =
-    !!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL
 
-  let leadsTableReachable = false
-  let leadsTableError: string | null = null
+/** Read the `role` and `ref` claims out of a legacy Supabase JWT. Claims only. */
+function inspectKey(key: string): { format: string; role: string | null; ref: string | null } {
+  if (!key) return { format: 'missing', role: null, ref: null }
+  if (key.startsWith('sb_secret_')) return { format: 'new_secret', role: 'secret', ref: null }
+  if (key.startsWith('sb_publishable_')) return { format: 'new_publishable', role: 'publishable', ref: null }
+  const parts = key.split('.')
+  if (parts.length !== 3) return { format: 'unrecognised', role: null, ref: null }
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)))
+    return { format: 'legacy_jwt', role: claims.role ?? null, ref: claims.ref ?? null }
+  } catch {
+    return { format: 'undecodable', role: null, ref: null }
+  }
+}
+
+export async function GET() {
+  const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').trim()
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
+  const resendConfigured = !!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL
+
+  const k = inspectKey(key)
+  const urlRef = url.match(/^https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1] ?? null
+
+  let reachable = false
+  let status: number | null = null
+  let code: string | null = null
+  let diagnosis = 'not_configured'
 
   if (url && key) {
     try {
-      const db = createClient(url, key, { auth: { persistSession: false } })
-      // Deliberately NOT { head: true }. A HEAD response carries no body, so a
-      // 404 parses as an empty success and the check reports a table that is
-      // not there — which is exactly how this failure stayed hidden.
-      const { error } = await db.from('leads').select('id').limit(1)
-      if (error) leadsTableError = error.code || 'unknown'
-      else leadsTableReachable = true
+      // Raw fetch, not supabase-js: the HTTP status is the most diagnostic
+      // signal here and the client library flattens it away. Also NOT a HEAD
+      // request — a HEAD 404 has no body and reads back as an empty success,
+      // which is precisely how a table that never existed was reported as
+      // existing with 0 rows.
+      const res = await fetch(`${url}/rest/v1/leads?select=id&limit=1`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+        cache: 'no-store',
+      })
+      status = res.status
+      if (res.ok) { reachable = true; diagnosis = 'ok' }
+      else {
+        const body = await res.json().catch(() => null)
+        code = body?.code ?? null
+        if (code === 'PGRST205') diagnosis = 'table_missing'
+        else if (code === '42501') diagnosis = 'rls_denied'
+        else if (res.status === 401) diagnosis = 'invalid_api_key'
+        else diagnosis = `http_${res.status}`
+      }
     } catch {
-      leadsTableError = 'unreachable'
+      diagnosis = 'network_error'
     }
   }
 
   return NextResponse.json({
     supabaseUrlPresent: !!url,
-    supabaseUrlLooksValid: url.startsWith('https://') && url.includes('.supabase.co'),
+    supabaseUrlLooksValid: !!urlRef,
     serviceKeyPresent: !!key,
-    // A PostgREST error CODE only (e.g. PGRST205) — enough to identify the
-    // fault, and it names no schema internals.
-    leadsTableReachable,
-    leadsTableError,
+    serviceKeyFormat: k.format,
+    // Should be "service_role". "anon" means the wrong key was pasted in.
+    serviceKeyRole: k.role,
+    // false means the key belongs to a DIFFERENT Supabase project than the URL.
+    serviceKeyMatchesProject: k.ref && urlRef ? k.ref === urlRef : null,
+    leadsTableReachable: reachable,
+    httpStatus: status,
+    postgrestCode: code,
+    diagnosis,
     resendConfigured,
-    // Storage must actually WORK, not merely be configured. If neither storage
-    // nor email can take a lead, a real submission has nowhere to go.
-    canAcceptLeads: leadsTableReachable || resendConfigured,
+    canAcceptLeads: reachable || resendConfigured,
   })
 }
