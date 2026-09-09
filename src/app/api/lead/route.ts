@@ -81,6 +81,11 @@ export async function POST(req: NextRequest) {
 
   let stored = false
   let storeError: string | null = null
+  // PostgREST error code, surfaced verbatim in the failure response. It names
+  // no schema internals but says precisely which fault this is — PGRST205 is a
+  // missing table, 42501 an RLS denial. Guessing between those from outside
+  // cost real debugging time.
+  let storeCode: string | null = null
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -100,7 +105,7 @@ export async function POST(req: NextRequest) {
         // Kept for abuse triage only, never displayed.
         submitted_ip: ip === 'unknown' ? null : ip,
       })
-      if (error) storeError = error.message
+      if (error) { storeError = error.message; storeCode = error.code || null }
       else stored = true
     } catch (e) {
       storeError = e instanceof Error ? e.message : 'unknown storage error'
@@ -164,6 +169,7 @@ export async function POST(req: NextRequest) {
       {
         error: 'We could not record your message. Please email or call us directly.',
         reason: storeError === 'Supabase not configured' ? 'not_configured' : 'store_failed',
+        code: storeCode,
       },
       { status: 500 },
     )
@@ -177,21 +183,47 @@ export async function POST(req: NextRequest) {
 /**
  * GET /api/lead — configuration health.
  *
- * Booleans only: whether each variable is PRESENT, never its value. Enough to
- * diagnose a misconfigured deploy from outside without exposing anything. The
- * equivalent question was previously unanswerable without dashboard access.
+ * Presence booleans (never values), PLUS a real round-trip to the table.
+ *
+ * The booleans alone once reported a perfectly healthy deploy while every
+ * submission was being dropped, because the `leads` migration had never been
+ * applied to the database. Env vars being set says nothing about whether the
+ * write can actually land, so this now attempts the read.
  */
 export async function GET() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+  const resendConfigured =
+    !!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL
+
+  let leadsTableReachable = false
+  let leadsTableError: string | null = null
+
+  if (url && key) {
+    try {
+      const db = createClient(url, key, { auth: { persistSession: false } })
+      // Deliberately NOT { head: true }. A HEAD response carries no body, so a
+      // 404 parses as an empty success and the check reports a table that is
+      // not there — which is exactly how this failure stayed hidden.
+      const { error } = await db.from('leads').select('id').limit(1)
+      if (error) leadsTableError = error.code || 'unknown'
+      else leadsTableReachable = true
+    } catch {
+      leadsTableError = 'unreachable'
+    }
+  }
+
   return NextResponse.json({
     supabaseUrlPresent: !!url,
     supabaseUrlLooksValid: url.startsWith('https://') && url.includes('.supabase.co'),
-    serviceKeyPresent: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-    resendConfigured: !!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL,
-    // If storage is unconfigured AND email is unconfigured, a real submission
-    // has nowhere to go and will 500.
-    canAcceptLeads:
-      (!!url && !!process.env.SUPABASE_SERVICE_ROLE_KEY) ||
-      (!!process.env.RESEND_API_KEY && !!process.env.LEAD_NOTIFY_EMAIL),
+    serviceKeyPresent: !!key,
+    // A PostgREST error CODE only (e.g. PGRST205) — enough to identify the
+    // fault, and it names no schema internals.
+    leadsTableReachable,
+    leadsTableError,
+    resendConfigured,
+    // Storage must actually WORK, not merely be configured. If neither storage
+    // nor email can take a lead, a real submission has nowhere to go.
+    canAcceptLeads: leadsTableReachable || resendConfigured,
   })
 }
