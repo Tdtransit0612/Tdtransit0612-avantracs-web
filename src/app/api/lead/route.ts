@@ -221,6 +221,16 @@ export async function GET() {
   let status: number | null = null
   let code: string | null = null
   let diagnosis = 'not_configured'
+  // Two different faults both surface as a thrown fetch: an unresolvable host,
+  // and a key that is illegal as an HTTP header value. Probing the URL with no
+  // Authorization header at all separates them — an unauthenticated PostgREST
+  // returns 401, so a REPLY of any kind proves the host is fine and the fault
+  // is the key.
+  let urlReachable: boolean | null = null
+  let failure: string | null = null
+
+  const redact = (t: string) =>
+    (key ? t.split(key).join('<key>') : t).slice(0, 200)
 
   if (url && key) {
     try {
@@ -243,8 +253,17 @@ export async function GET() {
         else if (res.status === 401) diagnosis = 'invalid_api_key'
         else diagnosis = `http_${res.status}`
       }
-    } catch {
+    } catch (e) {
       diagnosis = 'network_error'
+      // Redacted against the key before it is ever returned.
+      failure = redact(e instanceof Error ? `${e.name}: ${e.message}` : 'unknown')
+    }
+
+    try {
+      const bare = await fetch(`${url}/rest/v1/`, { cache: 'no-store' })
+      urlReachable = bare.status > 0
+    } catch {
+      urlReachable = false
     }
   }
 
@@ -262,11 +281,19 @@ export async function GET() {
     serviceKeyLength: key.length,
     serviceKeySegments: key ? key.split('.').length : 0,
     serviceKeyHasInteriorWhitespace: /s/.test(key),
+    // A JWT is strictly [A-Za-z0-9._-]. Anything else means the value was
+    // transformed on its way into the dashboard rather than merely mistyped,
+    // and a non-Latin-1 character is what makes fetch throw before it sends.
+    serviceKeyCharsetOk: /^[A-Za-z0-9._-]*$/.test(key),
+    serviceKeyNonAsciiCount: (key.match(/[^ -~]/g) || []).length,
     // Should be "service_role". "anon" means the wrong key was pasted in.
     serviceKeyRole: k.role,
     // false means the key belongs to a DIFFERENT Supabase project than the URL.
     serviceKeyMatchesProject: k.ref && urlRef ? k.ref === urlRef : null,
     leadsTableReachable: reachable,
+    // true here with leadsTableReachable false isolates the fault to the key.
+    supabaseHostReachable: urlReachable,
+    fetchFailure: failure,
     httpStatus: status,
     postgrestCode: code,
     diagnosis,
