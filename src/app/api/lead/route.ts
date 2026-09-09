@@ -253,6 +253,15 @@ export async function GET() {
     supabaseUrlLooksValid: !!urlRef,
     serviceKeyPresent: !!key,
     serviceKeyFormat: k.format,
+    // Shape only. A length and a segment count cannot reconstruct a secret, but
+    // they identify the mangling that a presence boolean cannot see: a healthy
+    // legacy key is one line, roughly 200-250 chars, in exactly 3 dot-separated
+    // segments, with no interior whitespace. Interior whitespace is fatal on its
+    // own — a newline makes the value illegal as an HTTP header, so fetch throws
+    // before a request is ever sent and the failure looks like a network outage.
+    serviceKeyLength: key.length,
+    serviceKeySegments: key ? key.split('.').length : 0,
+    serviceKeyHasInteriorWhitespace: /s/.test(key),
     // Should be "service_role". "anon" means the wrong key was pasted in.
     serviceKeyRole: k.role,
     // false means the key belongs to a DIFFERENT Supabase project than the URL.
